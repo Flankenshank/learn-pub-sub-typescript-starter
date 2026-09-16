@@ -1,13 +1,14 @@
 import amqp from "amqplib";
-import { ArmyMovesPrefix, ExchangePerilDirect, ExchangePerilTopic, PauseKey } from "../internal/routing/routing.js";
+import { ArmyMovesPrefix, ExchangePerilDirect, ExchangePerilTopic, PauseKey, WarRecognitionsPrefix } from "../internal/routing/routing.js";
 import { clientWelcome, commandStatus, getInput, printClientHelp, printQuit } from "../internal/gamelogic/gamelogic.js";
 import { SimpleQueueType, subscribeJSON } from "../internal/pubsub/consume.js";
 import { GameState } from "../internal/gamelogic/gamestate.js";
 import { commandSpawn } from "../internal/gamelogic/spawn.js";
 import { commandMove } from "../internal/gamelogic/move.js";
-import { handlerPause, handlerMove } from "./handlers.js";
+import { handlerPause, handlerMove, handlerWar } from "./handlers.js";
 import { publishJSON } from "../internal/pubsub/publish.js";
 import type { ArmyMove } from "../internal/gamelogic/gamedata.js";
+import type { RecognitionOfWar } from "../internal/gamelogic/gamedata.js";
 
 async function main() {
     const rabbitConn  = await amqp.connect("amqp://guest:guest@localhost:5672");
@@ -42,11 +43,17 @@ async function main() {
     const queueName = `${ArmyMovesPrefix}.${username}`;
 
     try {
-      await subscribeJSON<ArmyMove>(rabbitConn, ExchangePerilTopic, queueName, `${ArmyMovesPrefix}.*`, SimpleQueueType.Transient, handlerMove(gameState))
+      await subscribeJSON<ArmyMove>(rabbitConn, ExchangePerilTopic, queueName, `${ArmyMovesPrefix}.*`, SimpleQueueType.Transient, handlerMove(gameState, publishCh));
       console.log(`Subscribed to army moves for user ${username}`);
     } catch(err) {
       console.error("Failed to subscribe to army moves:", err);
     };
+    try {
+      await subscribeJSON<RecognitionOfWar>(rabbitConn, ExchangePerilTopic, "war", `${WarRecognitionsPrefix}.*`, SimpleQueueType.Durable, handlerWar(gameState));
+      console.log(`Subscribed to war recognitions for user ${username}`);
+    } catch(err) {
+      console.error("Failed to subscribe to war recognitions:", err);
+    }; 
 
       while (true) {
         const words = await getInput();
@@ -79,11 +86,7 @@ async function main() {
           break;
         } else {
           console.log(`Unknown command: ${command}`);
-        }
-    
-      }
-
-  }
+        }}}
 
   main().catch((err) => {
   console.error("Fatal error:", err);
