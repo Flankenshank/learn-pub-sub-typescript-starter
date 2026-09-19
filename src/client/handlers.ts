@@ -23,13 +23,17 @@ export function handlerMove(gs: GameState, ch: ConfirmChannel): (move: ArmyMove)
         if (MoveOutcome.Safe === outcome) {
             return AckType.Ack;
         } else if (MoveOutcome.MakeWar === outcome) {
+            try {
             const rw: RecognitionOfWar = {
                 attacker: move.player,
                 defender: gs.getPlayerSnap(),
             };
             await publishJSON(ch, ExchangePerilTopic, `${WarRecognitionsPrefix}.${gs.getUsername()}`, rw);
+            return AckType.Ack;
+        } catch (err) {
+            console.error("Error publishing war recognition:", err);
             return AckType.NackRequeue;
-        }
+        }}
         return AckType.NackDiscard;
     } catch (err) {
         console.error("Error handling move:", err);
