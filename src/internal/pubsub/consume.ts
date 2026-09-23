@@ -43,7 +43,6 @@ export async function subscribeJSON<T>(
 ): Promise<void> {
   await declareAndBind(conn, exchange, queueName, key, queueType)
     .then(([channel, queue]) => {
-      console.log(`Subscribed to queue ${queue.queue} with key ${key}`);
       channel.consume(queue.queue, async (msg: amqp.ConsumeMessage | null) => {
         if (msg === null) {
           return;
@@ -53,15 +52,12 @@ export async function subscribeJSON<T>(
           switch (ack) {
             case AckType.Ack:
               channel.ack(msg);
-              console.log (`Acknowledged message from queue ${queue.queue}`);
               break;
             case AckType.NackRequeue:
               channel.nack(msg, false, true);
-              console.log (`Nacked message from queue ${queue.queue} with requeue`);
               break;
             case AckType.NackDiscard:
               channel.nack(msg, false, false);
-              console.log (`Nacked message from queue ${queue.queue} with discard`);
               break;
           }
         }

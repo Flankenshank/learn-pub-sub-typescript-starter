@@ -10,7 +10,7 @@ async function main() {
   console.log("Connected to RabbitMQ");
   printServerHelp();
 
-  const gameLogQueue = await declareAndBind(rabbitConn, ExchangePerilDirect , GameLogSlug, "game_logs.*", SimpleQueueType.Durable);
+  const gameLogQueue = await declareAndBind(rabbitConn, ExchangePerilTopic, GameLogSlug, "game_logs.*", SimpleQueueType.Durable);
 
   while (true) {
     const words = await getInput();

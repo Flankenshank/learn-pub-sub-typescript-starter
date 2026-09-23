@@ -1,14 +1,16 @@
 import amqp from "amqplib";
-import { ArmyMovesPrefix, ExchangePerilDirect, ExchangePerilTopic, PauseKey, WarRecognitionsPrefix } from "../internal/routing/routing.js";
+import { ArmyMovesPrefix, ExchangePerilDirect, ExchangePerilTopic, GameLogSlug, PauseKey, WarRecognitionsPrefix } from "../internal/routing/routing.js";
 import { clientWelcome, commandStatus, getInput, printClientHelp, printQuit } from "../internal/gamelogic/gamelogic.js";
 import { SimpleQueueType, subscribeJSON } from "../internal/pubsub/consume.js";
 import { GameState } from "../internal/gamelogic/gamestate.js";
 import { commandSpawn } from "../internal/gamelogic/spawn.js";
 import { commandMove } from "../internal/gamelogic/move.js";
 import { handlerPause, handlerMove, handlerWar } from "./handlers.js";
-import { publishJSON } from "../internal/pubsub/publish.js";
+import { publishJSON, publishMsgPack } from "../internal/pubsub/publish.js";
 import type { ArmyMove } from "../internal/gamelogic/gamedata.js";
 import type { RecognitionOfWar } from "../internal/gamelogic/gamedata.js";
+import type { GameLog } from "../internal/gamelogic/logs.js";
+import type { ConfirmChannel } from "amqplib"
 
 async function main() {
     const rabbitConn  = await amqp.connect("amqp://guest:guest@localhost:5672");
@@ -23,7 +25,7 @@ async function main() {
     const username = await clientWelcome();
     console.log(`Username set to: ${username}`);
 
-    const gameState = new GameState(username);
+    const gs = new GameState(username);
     const publishCh = await rabbitConn.createConfirmChannel();
     
     try {
@@ -33,12 +35,21 @@ async function main() {
       `pause.${username}`,
       PauseKey, 
       SimpleQueueType.Transient,
-      handlerPause(gameState)
+      handlerPause(gs)
     );
       console.log(`Subscribed to pause messages for user ${username}`);
     } catch(err) {
       console.error("Failed to subscribe to pause messages:", err);
     };
+
+  await subscribeJSON(
+    rabbitConn,
+    ExchangePerilTopic,
+    WarRecognitionsPrefix,
+    `${WarRecognitionsPrefix}.*`,
+    SimpleQueueType.Durable,
+    handlerWar(gs, publishCh),
+  );
 
     const queueName = `${ArmyMovesPrefix}.${username}`;
 
@@ -49,7 +60,7 @@ async function main() {
       console.error("Failed to subscribe to army moves:", err);
     };
     try {
-      await subscribeJSON<RecognitionOfWar>(rabbitConn, ExchangePerilTopic, "war", `${WarRecognitionsPrefix}.*`, SimpleQueueType.Durable, handlerWar(gameState));
+      await subscribeJSON<RecognitionOfWar>(rabbitConn, ExchangePerilTopic, `${WarRecognitionsPrefix}.${username}`, `${WarRecognitionsPrefix}.*`, SimpleQueueType.Durable, handlerWar(gameState, publishCh));
       console.log(`Subscribed to war recognitions for user ${username}`);
     } catch(err) {
       console.error("Failed to subscribe to war recognitions:", err);
@@ -63,20 +74,20 @@ async function main() {
         const command = words[0];
         if (command === "spawn") {
           try {
-            commandSpawn(gameState, words);
+            commandSpawn(gs, words);
           } catch (err) {
             console.log((err as Error).message);
           }
         } else if (command === "move") {
           try {
-            const moveData = commandMove(gameState, words);
+            const moveData = commandMove(gs, words);
             await publishJSON(publishCh, ExchangePerilTopic, `${ArmyMovesPrefix}.${username}`, moveData);
             console.log(`Published move to ${moveData.toLocation} with ${moveData.units.length} unit(s)`);
           } catch (err) {
             console.log((err as Error).message);
           }
       } else if (command === "status") {
-          commandStatus(gameState);
+          commandStatus(gs);
         } else if (command === "help") {
           printClientHelp();
         } else if (command === "spam") {
@@ -87,6 +98,24 @@ async function main() {
         } else {
           console.log(`Unknown command: ${command}`);
         }}}
+
+export async function publishGameLog(
+  channel: amqp.ConfirmChannel,
+  username: string,
+  message: string
+): Promise<void> {
+    const newGameLog: GameLog = {
+      currentTime: new Date(),
+      message,
+      username,
+    };
+    return publishMsgPack(
+    channel,
+    ExchangePerilTopic,
+    `${GameLogSlug}.${username}`,
+    newGameLog,
+  );
+  }
 
   main().catch((err) => {
   console.error("Fatal error:", err);
